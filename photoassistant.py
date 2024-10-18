@@ -118,6 +118,7 @@ class photoassistant(Gtk.Window):
 
         response = dialog.run()
         if response == Gtk.ResponseType.OK:
+            self.clearall(widget)
             files = dialog.get_filenames()
             self.input_entry.set_text(", ".join(files))  # Show selected files
         
