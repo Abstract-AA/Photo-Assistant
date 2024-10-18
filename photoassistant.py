@@ -81,11 +81,36 @@ class photoassistant(Gtk.Window):
         self.status_label = Gtk.Label(label="")
         vbox.pack_start(self.status_label, False, False, 0)
 
+        # HBox to store buttons at upper right corner, first row
+        hbox_controls2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        hbox_controls2.set_halign(Gtk.Align.FILL)  # Center align the hbox_controls
+
+        # Clear all button
+        clearall_button = Gtk.Button(label="Clear All Inputs")
+        clearall_button.connect("clicked", self.clearall)
+        hbox_controls2.pack_start(clearall_button, True, True, 0)                                                  
+
+        grid.attach(hbox_controls2, 4, 0, 2, 1)
+
+        # HBox to store buttons at upper right corner, second row
+        hbox_controls3 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        hbox_controls3.set_halign(Gtk.Align.FILL)  # Center align the hbox_controls
+
+        # Cluster the Images
+        cluster_button = Gtk.Button(label="Cluster Photos")
+        cluster_button.connect("clicked", self.cluster)
+        hbox_controls3.pack_start(cluster_button, True, True, 0)                                                  
+
+        grid.attach(hbox_controls3, 4, 1, 2, 1)
+
+        self.status_label = Gtk.Label(label="")
+        grid.attach(self.status_label, 0, 5, 3, 1)
+
         #a sidebar for further options and fine tuning adjustments could be included, consider this later
     
     def on_select_input_file(self, widget):
         dialog = Gtk.FileChooserDialog(
-            title="Select Input File(s) or Folder", parent=self, action=Gtk.FileChooserAction.OPEN
+        title="Select Input File(s) or Folder", parent=self, action=Gtk.FileChooserAction.OPEN
         )
         dialog.set_select_multiple(True)
         dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
@@ -95,6 +120,12 @@ class photoassistant(Gtk.Window):
         if response == Gtk.ResponseType.OK:
             files = dialog.get_filenames()
             self.input_entry.set_text(", ".join(files))  # Show selected files
+        
+            # Set output directory based on the first selected file
+            if files:
+                self.input_directory = os.path.dirname(files[0])
+                self.output_entry.set_text(self.input_directory)
+
             if all(os.path.isdir(f) for f in files):
                 self.load_images_from_directory(files[0])
             else:
@@ -102,24 +133,8 @@ class photoassistant(Gtk.Window):
 
         dialog.destroy()
 
-        if response == Gtk.ResponseType.OK:
-            files = dialog.get_filenames()  # Get list of selected files
-            if self.output_auto:
-                #self.input_directory = os.path.dirname(input_file_path)
-                #self.output_entry.set_text(self.input_directory)
-                pass
-            if all(os.path.isdir(f) for f in files):  # If a folder is selected
-                self.load_images_from_directory(files[0])  # Load images from the first selected directory
-            else:
-                self.input_entry.set_text(", ".join(files))  # Set input entry to show selected files
-                self.load_images_from_files(files)  # Load individual images
-
-        dialog.destroy()
-
     def load_images_from_directory(self, directory):
-        # Clear previous thumbnails
-        self.clear_thumbnails()
-
+        self.clearall(widget)
         # Load images from a directory
         image_paths = []
         supported_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
@@ -170,16 +185,18 @@ class photoassistant(Gtk.Window):
             self.output_entry.set_text(dialog.get_filename())
         dialog.destroy()
 
-    def on_select_output_directory(self, widget):
-            dialog = Gtk.FileChooserDialog(
-            title="Select Output Directory", parent=self, action=Gtk.FileChooserAction.SELECT_FOLDER
-            )
-            dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
-            response = dialog.run()
-            if response == Gtk.ResponseType.OK:
-                self.output_entry.set_text(dialog.get_filename())
-            dialog.destroy()    
+    def clearall(self,widget):
+        self.input_entry.set_text("")
+        self.output_entry.set_text("")
 
+        for child in self.thumbnail_grid1.get_children():
+            self.thumbnail_grid1.remove(child)
+        for child in self.thumbnail_grid2.get_children():
+            self.thumbnail_grid2.remove(child)
+
+    def cluster(self, widget):
+       pass
+    
     def on_open_settings(self,widget):
         # this creates a dialog window for settings
         dialog = Gtk.Dialog(title="Settings", transient_for=self, flags=0)
@@ -217,9 +234,9 @@ class photoassistant(Gtk.Window):
 
         dialog.destroy()
 
-    def on_toggle_auto_output_folder(self, widget):
-        self.output_auto = widget.get_active()
-        print(f"Automatic output folder selection: {self.output_auto}")
+    #def on_toggle_auto_output_folder(self, widget):
+        #self.output_auto = widget.get_active()
+        #print(f"Automatic output folder selection: {self.output_auto}")
 
 def main():
     app = photoassistant()
