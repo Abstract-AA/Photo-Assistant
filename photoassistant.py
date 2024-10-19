@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, GObject, GdkPixbuf, GLib, Gdk
+gi.require_version("Rsvg", "2.0")
+from gi.repository import Gtk, GObject, GdkPixbuf, GLib, Gdk, Rsvg
 from moviepy.editor import VideoFileClip
 import os
 import time
@@ -56,6 +57,9 @@ class photoassistant(Gtk.Window):
         output_directory_button.connect("clicked", self.on_select_output_directory)
         grid.attach(output_directory_button, 2, 1, 1, 1)
 
+        self.status_label = Gtk.Label(label="")
+        grid.attach(self.status_label, 3, 1, 1, 1)
+
         # Horizontal box to hold two scrollable windows
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         vbox.pack_start(hbox, True, True, 0)
@@ -90,6 +94,11 @@ class photoassistant(Gtk.Window):
         clearall_button.connect("clicked", self.clearall)
         hbox_controls2.pack_start(clearall_button, True, True, 0)                                                  
 
+        # About button
+        about_button = Gtk.Button(label="About")
+        about_button.connect("clicked", self.on_about_button_clicked)
+        hbox_controls2.pack_start(about_button, True, True, 0)                                                  
+
         grid.attach(hbox_controls2, 4, 0, 2, 1)
 
         # HBox to store buttons at upper right corner, second row
@@ -99,14 +108,16 @@ class photoassistant(Gtk.Window):
         # Cluster the Images
         cluster_button = Gtk.Button(label="Cluster Photos")
         cluster_button.connect("clicked", self.cluster)
-        hbox_controls3.pack_start(cluster_button, True, True, 0)                                                  
+        hbox_controls3.pack_start(cluster_button, True, True, 0)        
+
+        #Settings Button
+        settings_button=Gtk.Button(label="Settings")
+        settings_button.connect("clicked",self.on_open_settings)
+        hbox_controls3.pack_start(settings_button,True,True,0)                                          
 
         grid.attach(hbox_controls3, 4, 1, 2, 1)
 
-        self.status_label = Gtk.Label(label="")
-        grid.attach(self.status_label, 0, 5, 3, 1)
-
-        #a sidebar for further options and fine tuning adjustments could be included, consider this later
+        # A sidebar for further options and fine tuning adjustments could be included, consider this later
     
     def on_select_input_file(self, widget):
         dialog = Gtk.FileChooserDialog(
@@ -125,7 +136,8 @@ class photoassistant(Gtk.Window):
             # Set output directory based on the first selected file
             if files:
                 self.input_directory = os.path.dirname(files[0])
-                self.output_entry.set_text(self.input_directory)
+                if self.output_auto:
+                    self.output_entry.set_text(self.input_directory)
 
             if all(os.path.isdir(f) for f in files):
                 self.load_images_from_directory(files[0])
@@ -146,7 +158,7 @@ class photoassistant(Gtk.Window):
         self.load_images_from_files(image_paths)
     
     def load_images_from_files(self, files):
-        # Load images into the first thumbnail grid
+        # load images into the first thumbnail grid
         for idx, file in enumerate(files):
             self.add_thumbnail(file, self.thumbnail_grid1, idx)
 
@@ -196,7 +208,77 @@ class photoassistant(Gtk.Window):
             self.thumbnail_grid2.remove(child)
 
     def cluster(self, widget):
-       pass
+        files = self.input_entry.get_text().split(", ")
+        if not files:
+            self.update_status("No images to cluster.")
+            return
+
+        # Clear the second grid before clustering (runs on main thread)
+        for child in self.thumbnail_grid2.get_children():
+            self.thumbnail_grid2.remove(child)
+
+        # Update status to inform user that clustering has started
+        self.update_status(f"Clustering Images...")
+
+        # Run the clustering process in a background thread
+        thread = threading.Thread(target=self.cluster_images_thread, args=(files,))
+        thread.start()
+
+    def cluster_images_thread(self, image_paths):     # this function runs in a separate thread to avoid frezing the GUI
+        clusters = self.cluster_images(image_paths)
+
+        # Pass the result back to the main thread to update the GUI
+        GLib.idle_add(self.display_clusters, clusters)
+
+    def display_clusters(self, clusters): # Updates the GUI with clustered images,runs on the main thread tho
+        row = 0
+
+        for cluster in clusters:
+            # Add a horizontal separator between clusters
+            if row > 0:
+                separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                self.thumbnail_grid2.attach(separator, 0, row, 4, 1)
+                row += 1
+
+            for idx, image_path in enumerate(cluster):
+                self.add_thumbnail(image_path, self.thumbnail_grid2, row * 4 + idx)
+
+            row += (len(cluster) // 4) + 1  # Move to next row for new cluster
+
+        # Update the status to inform the user clustering is done
+        self.update_status(f"Clustering completed. {len(clusters)} clusters found.")
+
+    def cluster_images(self, image_paths):
+        # this funtion clusters images based on pixel similarity. Returns a list of clusters (each cluster is a list of image paths).
+        def are_similar(img1, img2):
+            # use basic image comparison (e.g., mean pixel difference or delta E)
+            img1 = Image.open(img1).resize((200, 200)) # these values can severely slow down performance
+            img2 = Image.open(img2).resize((200, 200))
+
+            # Convert to RGB if necessary
+            if img1.mode != "RGB":
+                img1 = img1.convert("RGB")
+            if img2.mode != "RGB":
+                img2 = img2.convert("RGB")
+
+            pixels1 = list(img1.getdata())
+            pixels2 = list(img2.getdata())
+
+            # compute the mean pixel difference or delta E
+            diff = sum(get_delta_e(p1, p2) for p1, p2 in zip(pixels1, pixels2)) / len(pixels1)
+            return diff < 15  # Threshold for similarity, TODO add this to settings later, scores above 10 seem to be ok
+
+        clusters = []
+        for image_path in image_paths:
+            added = False
+            for cluster in clusters:
+                if are_similar(image_path, cluster[0]):
+                    cluster.append(image_path)
+                    added = True
+                    break
+            if not added:
+                clusters.append([image_path])
+        return clusters
     
     def on_open_settings(self,widget):
         # this creates a dialog window for settings
@@ -206,6 +288,11 @@ class photoassistant(Gtk.Window):
         # Get the content area of the dialog
         content_area = dialog.get_content_area()
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        vbox.set_halign(Gtk.Align.CENTER)  # Center align the hbox_controls
+        vbox.set_margin_top(15)            # Add top margin
+        vbox.set_margin_bottom(15)         # Add bottom margin
+        vbox.set_margin_start(15)          # Add left margin
+        vbox.set_margin_end(15)            # Add right margin
         vbox.set_halign(Gtk.Align.CENTER)  # Center align the hbox_controls
         content_area.pack_start(vbox, False, False, 0)
         dialog.set_default_size(420, 180)
@@ -235,9 +322,69 @@ class photoassistant(Gtk.Window):
 
         dialog.destroy()
 
-    #def on_toggle_auto_output_folder(self, widget):
-        #self.output_auto = widget.get_active()
-        #print(f"Automatic output folder selection: {self.output_auto}")
+    def on_toggle_auto_output_folder(self, widget):
+        self.output_auto = widget.get_active()
+        print(f"Automatic output folder selection: {self.output_auto}")
+
+    def on_about_button_clicked(self, widget):
+         # Create the About dialog
+        about_dialog = Gtk.Dialog(title="About Photo Assistant", transient_for=self, flags=0)
+        about_dialog.set_default_size(400, 400)  # Adjust size to fit the icon and text
+        about_dialog.add_buttons(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+
+        # Create a vertical box to hold both the icon and the text
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        vbox.set_halign(Gtk.Align.CENTER)  # Center align the hbox_controls
+        vbox.set_margin_top(15)            # Add top margin
+        vbox.set_margin_bottom(15)         # Add bottom margin
+        vbox.set_margin_start(15)          # Add left margin
+        vbox.set_margin_end(15)            # Add right margin
+
+        # Load the SVG icon
+        icon_path = "/app/share/icons/hicolor/scalable/apps/PLACEHOLDER"  # Update with Photo Assistant SVG icon path
+        try:
+            handle = Rsvg.Handle.new_from_file(icon_path)  # Load the SVG file
+            # Create a pixbuf from the SVG handle
+            svg_dimensions = handle.get_dimensions()
+            icon_pixbuf = handle.get_pixbuf()
+        
+            # Create an image from the pixbuf
+            icon_image = Gtk.Image.new_from_pixbuf(icon_pixbuf)
+            icon_image.set_halign(Gtk.Align.CENTER)  # Center the icon
+            vbox.pack_start(icon_image, False, False, 0)
+        except Exception as e:
+            print(f"Error loading SVG: {e}")
+            # Handle error if the SVG cannot be loaded
+            icon_image = Gtk.Label(label="(Error loading SVG)")
+            icon_image.set_halign(Gtk.Align.CENTER)
+            vbox.pack_start(icon_image, False, False, 0)
+
+        # Create a label with information about the program
+        about_label = Gtk.Label(label=(
+        "\n"
+        "   This program automatically sorts images and selects the best one. The use case is to remove blurry and repeated photos. \n\n "
+        "   Usage:\n   "
+        "    1. Select the input images.\n    "
+        " \n PLACEHOLDER TEXT \n"
+        "   In the Settings menu, the threshold value represents how strict the frame selection will be, i.e. higher \n     threshold values mean that only very clear frames will be selected. \n\n "
+        "   Version alpha. This program comes with absolutely no warranty. Check the MIT Licence for further details.  "
+        ))
+        about_label.set_justify(Gtk.Justification.LEFT)
+        about_label.set_halign(Gtk.Align.CENTER)
+
+        # Add the label to the vertical box below the icon
+        vbox.pack_start(about_label, True, True, 0)
+
+        # Add the vbox to the content area of the dialog
+        about_content_area = about_dialog.get_content_area()
+        about_content_area.pack_start(vbox, True, True, 10)  # Add some padding for a cleaner look
+
+        # Show all components
+        about_dialog.show_all()
+
+        # Run the dialog and wait for response
+        about_dialog.run()
+        about_dialog.destroy()
 
 def main():
     app = photoassistant()
